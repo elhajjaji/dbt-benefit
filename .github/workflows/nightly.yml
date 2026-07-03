@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Run nocturne — la CI valide le CODE à chaque PR ; ce workflow valide les
+# DONNÉES chaque nuit : fraîcheur (RG_02), volumétrie (RG_30), anomalies
+# statistiques Elementary (RG_31/32) et rapport qualité complet en artefact.
+# En production, ce rôle revient à Airflow (DAG benefits_lakehouse) ;
+# le nightly GitHub reste utile comme filet indépendant de l'orchestrateur.
+# ─────────────────────────────────────────────────────────────────────────────
+name: nightly-data-quality
+
+on:
+  schedule:
+    - cron: "30 3 * * *"   # 03h30 UTC chaque nuit
+  workflow_dispatch: {}     # déclenchable à la main pour la démo
+
+env:
+  DBT_HOST: localhost
+  DBT_PORT: "5432"
+  DBT_USER: app
+  DBT_PASSWORD: app_secret
+  DBT_DBNAME: pocs
+  DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+
+jobs:
+  data-quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app_secret
+          POSTGRES_DB: pocs
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app -d pocs"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+      - name: Packages dbt
+        run: dbt deps --project-dir dbt
+
+      # En production ce job pointe la vraie base : pas de seed.
+      # Ici on recharge pour que le job soit auto-suffisant.
+      - name: Alimenter la zone Bronze
+        run: dbt seed --project-dir dbt --target ci --full-refresh
+
+      - name: RG_02 — fraîcheur des sources
+        run: dbt source freshness --project-dir dbt --target ci
+        continue-on-error: true   # seeds datés : informatif en atelier
+
+      - name: Build + tests (RG_30/31/32 incluses)
+        run: dbt build --project-dir dbt --target ci
+
+      - name: Rapport qualité Elementary
+        run: edr report --project-dir dbt --profiles-dir dbt
+        continue-on-error: true
+
+      - name: Publier le rapport en artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elementary-report
+          path: dbt/edr_target/elementary_report.html
+          if-no-files-found: ignore

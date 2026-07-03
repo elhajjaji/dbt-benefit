@@ -1,0 +1,12 @@
+id,numero_dossier,numero_individu,date_debut,date_fin,_ingested_at,_source_system,_batch_id
+1,DOS-2020-001,IND-001,2020-01-01,,2026-07-01 06:00:00,postgres_src,batch-001
+2,DOS-2020-001,IND-002,2020-01-01,,2026-07-01 06:00:00,postgres_src,batch-001
+3,DOS-2020-001,IND-003,2020-01-01,2023-06-30,2026-07-01 06:00:00,postgres_src,batch-001
+4,DOS-2020-001,IND-004,2020-01-01,,2026-07-01 06:00:00,postgres_src,batch-001
+5,DOS-2023-042,IND-003,2023-07-01,,2026-07-01 06:00:00,postgres_src,batch-001
+6,DOS-2021-007,IND-005,2021-05-01,,2026-07-01 06:00:00,postgres_src,batch-001
+7,DOS-2021-007,IND-006,2021-05-01,,2026-07-01 06:00:00,postgres_src,batch-001
+8,DOS-2021-007,IND-009,2021-03-15,,2026-07-01 06:00:00,postgres_src,batch-001
+9,DOS-2022-099,IND-007,2022-01-01,,2026-07-01 06:00:00,postgres_src,batch-001
+10,DOS-2022-099,IND-007,2022-05-01,,2026-07-01 07:30:00,redpanda_cdc,batch-002
+11,DOS-2024-011,IND-012,2024-01-01,,2026-07-01 06:00:00,postgres_src,batch-001

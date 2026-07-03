@@ -1,0 +1,102 @@
+version: 2
+
+models:
+  - name: stg_individu
+    description: >
+      Bénéficiaires standardisés (RG_03/04), sexe normalisé (RG_05), cohérence
+      biographique (RG_06), PII masquées selon le rôle (RG_07).
+    columns:
+      - name: sk_id
+        description: Clé surrogate déterministe (RG_04).
+        tests:
+          - unique
+          - not_null
+      - name: is_dates_coherentes
+        description: RG_06 — faux si la biographie est impossible.
+        tests:
+          - accepted_values:
+              values: [true]
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg06"]
+      - name: is_navs_valide
+        description: RG_28 — faux si le NAVS ne respecte pas le format NAVS13 (regex au contrat).
+        tests:
+          - accepted_values:
+              values: [true]
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg28"]
+
+  - name: stg_dossier
+    description: Rattachements familiaux, périodes normalisées (RG_08).
+    columns:
+      - name: sk_id
+        tests:
+          - unique
+          - not_null
+      - name: date_fin_normalisee
+        tests:
+          - not_null
+
+  - name: stg_permis
+    description: Permis OCPM, périodes normalisées (RG_08), domaine contrôlé (RG_09).
+    columns:
+      - name: sk_id
+        tests:
+          - unique
+          - not_null
+      - name: permis
+        tests:
+          # RG_09 — test générique contract-driven : le domaine vit dans le
+          # contrat (vars.contracts.permis), pas dans ce fichier.
+          - in_contract_domain:
+              entity: permis
+              domain_key: domaine_permis
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg09"]
+
+  - name: stg_prestation
+    description: Versements standardisés, type (RG_10) et barème (RG_15) contrôlés.
+    tests:
+      # RG_31 — détection d'anomalies statistiques de volume : Elementary
+      # apprend le volume habituel par run et alerte sur un écart anormal
+      # (chute d'ingestion, doublonnage massif) sans seuil codé en dur
+      - elementary.volume_anomalies:
+          timestamp_column: _ingested_at
+          config: { severity: warn, tags: ["rg31"] }
+    columns:
+      - name: sk_id
+        tests:
+          - unique
+          - not_null
+      - name: type_prestation
+        tests:
+          # RG_10 — domaine LASLP lu dans le contrat
+          - in_contract_domain:
+              entity: prestation
+              domain_key: domaine_type_prestation
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg10"]
+      - name: montant_prestation
+        tests:
+          # RG_14 — montant strictement positif (fail-fast en mode strict)
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              strictly: true
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg14"]
+
+  - name: stg_couverture_unifiee
+    description: RG_12 — union dossiers + permis valides = couverture unique.
+    columns:
+      - name: numero_individu
+        tests:
+          - not_null
+      - name: source_couverture
+        tests:
+          - accepted_values:
+              values: ["dossier", "permis"]

@@ -1,0 +1,136 @@
+version: 2
+
+models:
+  - name: dim_calendrier
+    description: RG_21 — axe temps continu, un jour par ligne depuis le début d'activité.
+    columns:
+      - name: date_jour
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_prestations
+    description: >
+      Table de faits centrale : un versement par ligne, enrichi des indicateurs
+      de conformité (couverture RG_18, senior RG_20, type RG_10, barème RG_15)
+      et du coût journalier sécurisé (RG_22). Schéma figé par contrat dbt.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: pk_prestation
+        data_type: text
+        description: Clé surrogate de la table de faits (RG_04).
+        tests:
+          - unique
+          - not_null
+      - name: numero_individu
+        data_type: text
+        description: '{{ doc("numero_individu") }}'
+      - name: type_prestation
+        data_type: text
+        description: '{{ doc("type_prestation") }}'
+      - name: montant_prestation
+        data_type: numeric
+      - name: date_debut_prestation
+        data_type: date
+      - name: date_fin_prestation
+        data_type: date
+      - name: date_prestation
+        data_type: date
+        description: Date du versement (référence des contrôles de couverture).
+      - name: numero_dossier
+        data_type: text
+        description: '{{ doc("numero_dossier") }} Attribué à la date du versement (protégé du fan-out).'
+      - name: montant_par_jour
+        data_type: numeric
+        description: RG_22 — montant / durée en jours (division par zéro impossible).
+      - name: is_conforme_couverture
+        data_type: boolean
+        description: RG_18 — couverture (dossier ou permis) active à la date du versement.
+        tests:
+          - accepted_values:
+              values: [true]
+              config:
+                severity: warn        # RG_18 est une alerte, jamais bloquante
+                tags: ["rg18"]
+      - name: is_alerte_senior
+        data_type: boolean
+        description: RG_20 — forfait entretien versé à un bénéficiaire ≥ 65 ans.
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn        # alerte métier, revue par le DPO
+                tags: ["rg20"]
+      - name: is_alerte_lamal_age
+        data_type: boolean
+        description: RG_25 — PRIME_LAMAL versée hors de la tranche 18-25 ans (bornes au contrat).
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn
+                tags: ["rg25"]
+      - name: is_verse_apres_deces
+        data_type: boolean
+        description: RG_26 — versement postérieur à la date de décès du bénéficiaire.
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg26"]
+      - name: is_migrant_sans_permis
+        data_type: boolean
+        description: RG_27 — prestation réservée aux migrants sans permis valide actif à la date du versement.
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn
+                tags: ["rg27"]
+      - name: is_type_valide
+        data_type: boolean
+        description: RG_10 — type conforme au domaine LASLP du contrat.
+      - name: is_montant_suspect
+        data_type: boolean
+        description: RG_15 — montant au-dessus du barème institutionnel du contrat.
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn        # dérogations possibles → alerte
+                tags: ["rg15"]
+
+  - name: agg_prestations_mensuelles
+    description: >
+      Agrégat mensuel par individu, pivoté par type de prestation (colonnes
+      mnt_*), avec contrôle du plafond de cumul (RG_19).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [numero_individu, mois]
+    columns:
+      - name: is_plafond_mensuel_depasse
+        description: RG_19 — cumul mensuel > plafond du contrat → alerte DPO.
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: warn
+                tags: ["rg19"]
+
+  - name: agg_loyers_dossier_mensuel
+    description: RG_17 — contrôle d'unicité du LOYER au grain dossier × mois.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [numero_dossier, mois]
+    columns:
+      - name: is_doublon_loyer
+        description: RG_17 — plus d'un loyer versé au même foyer le même mois.
+        tests:
+          - accepted_values:
+              values: [false]
+              config:
+                severity: "{{ var('rg_severity', 'warn') }}"
+                tags: ["rg17"]

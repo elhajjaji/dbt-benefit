@@ -1,0 +1,34 @@
+# Garde-fous AVANT le commit — la boucle de feedback la plus courte de la
+# chaîne CI/CD (secondes vs minutes). Installation :
+#   pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: ^dbt/dbt_packages/
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 3.0.7
+    hooks:
+      - id: sqlfluff-lint
+        files: ^dbt/models/
+        additional_dependencies:
+          - dbt-core>=1.8,<1.9
+          - dbt-postgres>=1.8,<1.9
+          - sqlfluff-templater-dbt>=3.0,<3.2
+
+  # dbt parse : détecte les erreurs Jinja/YAML avant même d'ouvrir la PR
+  - repo: local
+    hooks:
+      - id: dbt-parse
+        name: dbt parse (validation du projet)
+        entry: bash -c 'cd dbt && dbt parse -q'
+        language: system
+        files: ^dbt/
+        pass_filenames: false

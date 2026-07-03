@@ -1,0 +1,94 @@
+version: 2
+
+# ══════════════════════════════════════════════════════════════════════════
+# UNIT TESTS dbt (dbt >= 1.8) — tester la LOGIQUE d'un modèle avec des
+# données mockées, sans dépendre du contenu des seeds.
+# Différence avec les data tests : un data test valide les DONNÉES produites ;
+# un unit test valide le CODE, sur des entrées choisies, y compris des cas
+# que les seeds ne contiennent pas. Ils s'exécutent en début de `dbt build`.
+# ══════════════════════════════════════════════════════════════════════════
+
+unit_tests:
+  - name: rg22_cout_journalier_periode_un_jour
+    description: >
+      RG_22 — une prestation d'un seul jour (date_debut = date_fin) doit
+      avoir un coût journalier égal au montant, pas une division par zéro.
+    model: fct_prestations
+    given:
+      - input: ref('stg_prestation')
+        rows:
+          - {id: "T-1", numero_individu: "IND-T1", type_prestation: "AIDE_URGENCE",
+             montant_prestation: 100, date_debut_prestation: 2024-02-10,
+             date_fin_prestation: 2024-02-10, date_prestation: 2024-02-10,
+             is_type_valide: true, is_montant_suspect: false, sk_id: "sk-t1"}
+      - input: ref('stg_individu')
+        rows: []
+      - input: ref('stg_couverture_unifiee')
+        rows: []
+      - input: ref('stg_dossier')
+        rows: []
+      - input: ref('stg_permis')
+        rows: []
+    expect:
+      rows:
+        - {numero_individu: "IND-T1", montant_par_jour: "100.00"}
+
+  - name: rg18_couverture_active_et_inactive
+    description: >
+      RG_18 — un versement DANS la période de couverture est conforme ;
+      un versement HORS période ne l'est pas.
+    model: fct_prestations
+    given:
+      - input: ref('stg_prestation')
+        rows:
+          - {id: "T-2", numero_individu: "IND-T2", type_prestation: "LOYER",
+             montant_prestation: 2000, date_debut_prestation: 2024-01-01,
+             date_fin_prestation: 2024-01-31, date_prestation: 2024-01-05,
+             is_type_valide: true, is_montant_suspect: false, sk_id: "sk-t2"}
+          - {id: "T-3", numero_individu: "IND-T3", type_prestation: "LOYER",
+             montant_prestation: 2000, date_debut_prestation: 2024-01-01,
+             date_fin_prestation: 2024-01-31, date_prestation: 2024-01-05,
+             is_type_valide: true, is_montant_suspect: false, sk_id: "sk-t3"}
+      - input: ref('stg_couverture_unifiee')
+        rows:
+          # IND-T2 : couvert en janvier 2024 · IND-T3 : couverture close en 2023
+          - {numero_individu: "IND-T2", source_couverture: "dossier",
+             reference_couverture: "DOS-T", date_debut: 2020-01-01, date_fin_normalisee: 9999-12-31}
+          - {numero_individu: "IND-T3", source_couverture: "dossier",
+             reference_couverture: "DOS-T", date_debut: 2020-01-01, date_fin_normalisee: 2023-12-31}
+      - input: ref('stg_individu')
+        rows: []
+      - input: ref('stg_dossier')
+        rows: []
+      - input: ref('stg_permis')
+        rows: []
+    expect:
+      rows:
+        - {numero_individu: "IND-T2", is_conforme_couverture: true}
+        - {numero_individu: "IND-T3", is_conforme_couverture: false}
+
+  - name: rg20_rg26_senior_et_deces
+    description: >
+      RG_20 — un senior (79 ans) recevant un FORFAIT_ENTRETIEN est flagué.
+      RG_26 — un versement postérieur au décès est flagué.
+    model: fct_prestations
+    given:
+      - input: ref('stg_prestation')
+        rows:
+          - {id: "T-4", numero_individu: "IND-T4", type_prestation: "FORFAIT_ENTRETIEN",
+             montant_prestation: 1500, date_debut_prestation: 2024-03-01,
+             date_fin_prestation: 2024-03-31, date_prestation: 2024-03-05,
+             is_type_valide: true, is_montant_suspect: false, sk_id: "sk-t4"}
+      - input: ref('stg_individu')
+        rows:
+          - {numero_individu: "IND-T4", age_calcule: 79,
+             date_naissance: 1947-01-01, date_deces: 2024-02-15}
+      - input: ref('stg_couverture_unifiee')
+        rows: []
+      - input: ref('stg_dossier')
+        rows: []
+      - input: ref('stg_permis')
+        rows: []
+    expect:
+      rows:
+        - {numero_individu: "IND-T4", is_alerte_senior: true, is_verse_apres_deces: true}

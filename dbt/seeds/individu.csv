@@ -1,0 +1,13 @@
+id,numero_individu,nom,prenom,email,navs,sexe,date_naissance,date_deces,_ingested_at,_source_system,_batch_id
+1,IND-001,Dupont,Jean,jean.dupont@example.ch,756.1111.2222.33,H,1975-04-12,,2026-07-01 06:00:00,postgres_src,batch-001
+2,IND-002,Dupont,Marie,marie.dupont@example.ch,756.2222.3333.44,F,1978-09-23,,2026-07-01 06:00:00,postgres_src,batch-001
+3,IND-003,Dupont,Lucas,lucas.dupont@example.ch,756.3333.4444.55,H,2005-01-15,,2026-07-01 06:00:00,postgres_src,batch-001
+4,IND-004,Dupont,Emma,emma.dupont@example.ch,756.4444.5555.66,F,2010-06-30,,2026-07-01 06:00:00,postgres_src,batch-001
+5,IND-005,Benali,Karim,karim.benali@example.ch,756.5555.6666.77,H,1985-03-08,,2026-07-01 06:00:00,postgres_src,batch-001
+6,IND-006,Benali,Leila,leila.benali@example.ch,756.6666.7777.88,F,1988-11-19,,2026-07-01 06:00:00,postgres_src,batch-001
+7,IND-007,Moreau,Gisèle,gisele.moreau@example.ch,756.7777.8888.99,F,1952-02-05,,2026-07-01 06:00:00,postgres_src,batch-001
+8,IND-003,Dupont,Lucas,lucas.d@example.ch,756.3333.4444.55,H,2005-01-15,,2026-07-01 07:30:00,redpanda_cdc,batch-002
+9,IND-009,Petrov,Ivan,ivan.petrov@example.ch,756.9999.0000.11,H,1990-07-21,,2026-07-01 06:00:00,postgres_src,batch-001
+10,IND-010,Diallo,Amina,amina.diallo@example.ch,756.0000.1111.22,X,1995-12-02,,2026-07-01 06:00:00,postgres_src,batch-001
+11,IND-011,Erreur,Chrono,chrono.erreur@example.ch,NAVS-INVALIDE,,2030-01-01,,2026-07-01 06:00:00,postgres_src,batch-001
+12,IND-012,Rossi,Paolo,paolo.rossi@example.ch,756.5678.9012.34,H,1980-05-10,2024-02-15,2026-07-01 06:00:00,postgres_src,batch-001

@@ -1,0 +1,244 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Plateforme Data Lakehouse — Atelier Aide Sociale
+#
+# Profils Docker Compose (démarrage sélectif pour machines modestes) :
+#   (aucun)        → postgres (base source pocs, déjà disponible chez vous : voir .env)
+#   lakehouse      → MinIO (S3) + Nessie (catalogue Iceberg versionné)
+#   ingestion      → NiFi (batch) + Redpanda/Debezium (CDC)
+#   orchestration  → Airflow (planification des runs dbt)
+#   bi             → Dremio (moteur SQL) + Metabase (dashboards)
+#   lineage        → Marquez (OpenLineage)
+#
+# Tout démarrer :   docker compose --profile "*" up -d
+# Sélectif      :   docker compose --profile lakehouse --profile bi up -d
+# (ou renseignez COMPOSE_PROFILES dans .env puis: docker compose up -d)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: benefits-lakehouse
+
+services:
+
+  # ── Base source (schéma src : individu, dossier, permis, prestation) ──────
+  # Si votre PostgreSQL source tourne déjà ailleurs, commentez ce service et
+  # renseignez POSTGRES_HOST dans .env.
+  postgres:
+    image: postgres:15
+    container_name: benefits-postgres
+    command: ["postgres", "-c", "wal_level=logical"]   # requis pour le CDC Debezium
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-pocs}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-pocs}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ── Lakehouse : stockage objet + catalogue Iceberg versionné ──────────────
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    container_name: benefits-minio
+    profiles: ["lakehouse"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_secret}
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-06-12T14-34-03Z
+    container_name: benefits-minio-init
+    profiles: ["lakehouse"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD:-minio_secret} &&
+      mc mb --ignore-existing local/warehouse &&
+      echo 'Bucket warehouse prêt.'
+      "
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.95.0
+    container_name: benefits-nessie
+    profiles: ["lakehouse"]
+    environment:
+      nessie.version.store.type: IN_MEMORY   # atelier ; ROCKSDB + volume en réel
+    ports:
+      - "19120:19120"
+
+  # ── Ingestion batch : Apache NiFi ──────────────────────────────────────────
+  nifi:
+    image: apache/nifi:1.25.0
+    container_name: benefits-nifi
+    profiles: ["ingestion"]
+    environment:
+      SINGLE_USER_CREDENTIALS_USERNAME: ${NIFI_USER:-admin}
+      SINGLE_USER_CREDENTIALS_PASSWORD: ${NIFI_PASSWORD:-admin12345678}
+      NIFI_WEB_HTTPS_PORT: "8443"
+    ports:
+      - "8443:8443"   # https://localhost:8443/nifi
+    volumes:
+      - nifidata:/opt/nifi/nifi-current/state
+
+  # ── Ingestion streaming : Redpanda + Debezium (CDC) ───────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v24.1.7
+    container_name: benefits-redpanda
+    profiles: ["ingestion"]
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"   # Kafka API (depuis l'hôte)
+      - "9644:9644"     # Admin API
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+
+  redpanda-console:
+    image: redpandadata/console:v2.5.2
+    container_name: benefits-redpanda-console
+    profiles: ["ingestion"]
+    depends_on: [redpanda]
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8086:8080"   # http://localhost:8086
+
+  kafka-connect:
+    image: debezium/connect:2.7
+    container_name: benefits-kafka-connect
+    profiles: ["ingestion"]
+    depends_on: [redpanda]
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: benefits-connect
+      CONFIG_STORAGE_TOPIC: _connect_configs
+      OFFSET_STORAGE_TOPIC: _connect_offsets
+      STATUS_STORAGE_TOPIC: _connect_status
+    ports:
+      - "8083:8083"   # API REST Kafka Connect
+
+  # ── Restitution : moteur SQL + BI ──────────────────────────────────────────
+  dremio:
+    image: dremio/dremio-oss:25.0
+    container_name: benefits-dremio
+    profiles: ["bi"]
+    ports:
+      - "9047:9047"    # UI web
+      - "31010:31010"  # ODBC/JDBC
+      - "32010:32010"  # Arrow Flight
+    volumes:
+      - dremiodata:/opt/dremio/data
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+  metabase:
+    image: metabase/metabase:v0.49.14
+    container_name: benefits-metabase
+    profiles: ["bi"]
+    ports:
+      - "3002:3000"   # http://localhost:3002
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    volumes:
+      - metabasedata:/metabase-data
+
+  # ── Orchestration : Apache Airflow ─────────────────────────────────────────
+  # Mode standalone (SQLite + LocalExecutor) : suffisant pour l'atelier.
+  # Le mot de passe admin est affiché dans les logs :
+  #   docker logs benefits-airflow 2>&1 | grep "Password for user"
+  airflow:
+    image: apache/airflow:2.9.3
+    container_name: benefits-airflow
+    profiles: ["orchestration"]
+    command: standalone
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      # dbt installé au démarrage du conteneur (2-3 min au premier lancement)
+      _PIP_ADDITIONAL_REQUIREMENTS: "dbt-core>=1.8,<1.9 dbt-postgres>=1.8,<1.9"
+      # dbt du conteneur → base source de l'hôte (pocs-postgres:5433)
+      DBT_HOST: host.docker.internal
+      DBT_PORT: ${POSTGRES_PORT:-5433}
+      DBT_USER: ${POSTGRES_USER:-user}
+      DBT_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      DBT_DBNAME: ${POSTGRES_DB:-pocs}
+      DBT_PROFILES_DIR: /opt/benefits/dbt
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8090:8080"   # http://localhost:8090
+    volumes:
+      - ./orchestration/airflow/dags:/opt/airflow/dags
+      - ./dbt:/opt/benefits/dbt
+      - airflowdata:/opt/airflow
+
+  # ── Observabilité : lignage OpenLineage ────────────────────────────────────
+  marquez-db:
+    image: postgres:14
+    container_name: benefits-marquez-db
+    profiles: ["lineage"]
+    environment:
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      POSTGRES_DB: marquez
+    volumes:
+      - marquezdata:/var/lib/postgresql/data
+
+  marquez:
+    image: marquezproject/marquez:0.47.0
+    container_name: benefits-marquez
+    profiles: ["lineage"]
+    depends_on: [marquez-db]
+    environment:
+      MARQUEZ_CONFIG: /usr/src/app/marquez.yml
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: marquez
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+    ports:
+      - "5000:5000"   # API OpenLineage
+      - "5001:5001"   # Admin
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.47.0
+    container_name: benefits-marquez-web
+    profiles: ["lineage"]
+    depends_on: [marquez]
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: "5000"
+    ports:
+      - "3000:3000"   # http://localhost:3000
+
+volumes:
+  pgdata:
+  miniodata:
+  nifidata:
+  redpandadata:
+  dremiodata:
+  metabasedata:
+  marquezdata:
+  airflowdata:

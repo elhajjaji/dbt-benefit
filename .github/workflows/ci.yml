@@ -1,0 +1,164 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD — cycle Write-Audit-Publish
+#
+#  PR ouverte  → LINT (SQLFluff) → AUDIT (dbt seed + build + tests singuliers)
+#  Merge main  → + PUBLISH (fusion branche Nessie, documentation dbt)
+#
+# L'AUDIT tourne sur un PostgreSQL jetable (service container) : chaque run
+# part de zéro, comme une branche Nessie Zero-Copy. Les étapes Nessie réelles
+# sont fournies en fin de fichier (nécessitent les secrets NESSIE_*).
+# ─────────────────────────────────────────────────────────────────────────────
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  DBT_HOST: localhost
+  DBT_PORT: "5432"
+  DBT_USER: app
+  DBT_PASSWORD: app_secret
+  DBT_DBNAME: pocs
+  DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+
+jobs:
+  # ── Étape 1 : LINT ─────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+      - name: Packages dbt (requis par le templater sqlfluff)
+        run: dbt deps --project-dir dbt
+      - name: Lint des modèles dbt
+        run: sqlfluff lint dbt/models --nofail
+        # --nofail en atelier : passer en bloquant une fois le style stabilisé
+
+  # ── Étapes 2-3 : WRITE (env jetable) + AUDIT (build + tests) ──────────────
+  audit:
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app_secret
+          POSTGRES_DB: pocs
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app -d pocs"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+      - name: Packages dbt
+        run: dbt deps --project-dir dbt
+
+      - name: Chargement des données de test (zone Bronze simulée)
+        run: dbt seed --project-dir dbt --target ci --full-refresh
+
+      # Unit tests d'abord : ils valident la LOGIQUE sur données mockées,
+      # sans dépendre des seeds — boucle de feedback la plus rapide
+      - name: Unit tests dbt (logique des modèles)
+        run: dbt test --project-dir dbt --target ci --select "test_type:unit"
+
+      - name: Build complet + tests génériques (mode alerte)
+        run: dbt build --project-dir dbt --target ci
+
+      - name: Historisation SCD2 des permis (RG_11)
+        run: dbt snapshot --project-dir dbt --target ci
+
+      - name: Tests singuliers (RG_13, 16, 23, 24, 29, 33)
+        run: dbt test --project-dir dbt --target ci --select tag:singular
+
+      # Garde-fou fail-fast : on vérifie que le mode strict détecte bien les
+      # anomalies volontaires des seeds (le pipeline DOIT échouer ici).
+      - name: Contrôle fail-fast — le mode strict doit détecter les anomalies
+        run: |
+          if dbt build --project-dir dbt --target ci --vars '{rg_severity: error}'; then
+            echo "::error::Le mode strict n'a détecté aucune anomalie : les RG bloquantes sont inopérantes."
+            exit 1
+          else
+            echo "OK : les RG bloquantes stoppent bien le pipeline en mode strict."
+          fi
+
+      - name: Rapport qualité Elementary
+        run: edr report --project-dir dbt --profiles-dir dbt
+        continue-on-error: true
+
+      - name: Publier le rapport Elementary en artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elementary-report
+          path: dbt/edr_target/elementary_report.html
+          if-no-files-found: ignore
+
+      - name: Documentation dbt
+        run: dbt docs generate --project-dir dbt --target ci --static
+
+      - name: Publier la documentation en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-docs
+          path: dbt/target/static_index.html
+
+      - name: Préparer la publication GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: mkdir -p site && cp dbt/target/static_index.html site/index.html
+      - name: Uploader le site Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # ── Documentation publiée sur GitHub Pages à chaque merge ─────────────────
+  docs-pages:
+    runs-on: ubuntu-latest
+    needs: audit
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Déployer la documentation dbt
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # ── Étape 4 : PUBLISH (uniquement au merge sur main) ──────────────────────
+  publish:
+    runs-on: ubuntu-latest
+    needs: audit
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fusion de la branche Nessie vers main (WAP — Publish)
+        env:
+          NESSIE_URL: ${{ secrets.NESSIE_URL }}
+          NESSIE_TOKEN: ${{ secrets.NESSIE_TOKEN }}
+        run: |
+          if [ -z "$NESSIE_URL" ]; then
+            echo "Secrets NESSIE_* absents : étape Publish lakehouse ignorée (mode atelier)."
+            exit 0
+          fi
+          curl --fail -X POST "$NESSIE_URL/api/v1/trees/branch/ci-${{ github.run_id }}/merge" \
+            -H "Authorization: Bearer $NESSIE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"fromRefName\": \"ci-${{ github.run_id }}\", \"toRefName\": \"main\"}"

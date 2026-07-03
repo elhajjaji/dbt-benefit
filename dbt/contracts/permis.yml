@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CONTRAT MÉTIER — PERMIS (édité par le Business Analyst, sans SQL)
+# ═══════════════════════════════════════════════════════════════════════════
+# Le permis matérialise le statut légal de séjour d'un migrant (référentiel
+# OCPM). Les migrants ont toujours un dossier ET un permis ; le permis
+# participe donc à la couverture (RG_12, RG_18).
+
+metadata:
+  name: permis
+  domain: statut_sejour
+  owner_metier: Aide aux migrants
+  owner_technique: Équipe Data
+  criticite: haute
+
+schema:
+  cle_metier: [numero_individu, permis, date_debut]
+
+regles:
+  - id: RG_09
+    nom: Domaine des permis OCPM
+    intention: >
+      Seuls B (séjour), C (établissement), F (admission provisoire),
+      N (demandeur d'asile), S (protection temporaire) et L (courte durée)
+      existent. Toute autre valeur est un rejet de saisie.
+    gravite: bloquant
+
+  - id: RG_11
+    nom: Historisation SCD2
+    intention: >
+      Le parcours administratif (N → F → B…) doit être auditable : chaque
+      changement de statut est conservé avec sa période de validité.
+    gravite: obligatoire
+    implementation: dbt snapshot (strategy check)
+
+  - id: RG_12
+    nom: Union de couverture
+    intention: >
+      Dossier et permis forment UNE seule table de couverture : vérifier la
+      couverture d'un versement (RG_18) = une seule jointure.
+    gravite: obligatoire
+
+  - id: RG_29
+    nom: Non-chevauchement des permis
+    intention: >
+      Un individu n'a qu'un seul statut légal de séjour à la fois : deux
+      permis valides dont les périodes se chevauchent sont une anomalie
+      de saisie OCPM.
+    gravite: bloquant
+    implementation: même macro detect_overlapping_periods que RG_13

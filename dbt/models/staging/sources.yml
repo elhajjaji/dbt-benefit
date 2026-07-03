@@ -1,0 +1,49 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: >
+      Zone Bronze du lakehouse : copie brute des 4 tables src.* de PostgreSQL,
+      livrée par NiFi (batch) et Redpanda/Debezium (CDC). En atelier, ces
+      tables sont alimentées par `dbt seed` (mêmes colonnes, y compris la
+      traçabilité RG_01).
+    schema: bronze
+    loader: nifi_redpanda
+    loaded_at_field: _ingested_at
+    freshness:
+      warn_after: { count: 24, period: hour }
+      error_after: { count: 72, period: hour }
+    tables:
+      - name: individu
+        description: Bénéficiaires (données personnelles — RG_07).
+        tests:
+          # RG_30 — volumétrie minimale (seuil au contrat)
+          - minimum_row_count:
+              entity: individu
+              config: { severity: error, tags: ["rg30"] }
+      - name: dossier
+        description: Rattachements individu ↔ dossier familial, avec période.
+        tests:
+          - minimum_row_count:
+              entity: dossier
+              config: { severity: error, tags: ["rg30"] }
+      - name: permis
+        description: Permis de séjour OCPM des migrants, avec période.
+        tests:
+          - minimum_row_count:
+              entity: permis
+              config: { severity: error, tags: ["rg30"] }
+      - name: prestation
+        description: Versements d'aide sociale / aide aux migrants.
+        tests:
+          - minimum_row_count:
+              entity: prestation
+              config: { severity: error, tags: ["rg30"] }
+          # RG_32 — dérive de schéma : Elementary mémorise le schéma observé
+          # et alerte si une colonne apparaît, disparaît ou change de type
+          - elementary.schema_changes:
+              config: { severity: warn, tags: ["rg32"] }
+        columns:
+          - name: montant_prestation
+            tests:
+              - not_null

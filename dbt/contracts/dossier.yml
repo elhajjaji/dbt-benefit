@@ -1,0 +1,44 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CONTRAT MÉTIER — DOSSIER (édité par le Business Analyst, sans SQL)
+# ═══════════════════════════════════════════════════════════════════════════
+# QU'EST-CE QU'UN DOSSIER À L'INSTITUTION ?
+# Un dossier est l'unité de prise en charge FAMILIALE : tous les membres d'une
+# famille vivant sous le même toit partagent le MÊME numéro de dossier.
+#
+# Exemple : DOS-2020-001 → Jean, Marie, Lucas et Emma Dupont.
+# Quand Lucas quitte le foyer (01/07/2023), son rattachement est clôturé le
+# 30/06/2023 et un nouveau dossier DOS-2023-042 est créé pour lui seul.
+# Il ne peut PAS être dans deux dossiers actifs simultanément (RG_13).
+
+metadata:
+  name: dossier
+  domain: couverture_familiale
+  owner_metier: Gestionnaires de dossiers
+  owner_technique: Équipe Data
+  criticite: haute
+
+schema:
+  cle_metier: [numero_dossier, numero_individu, date_debut]
+
+regles:
+  - id: RG_03
+    nom: Déduplication technique
+    intention: >
+      NiFi (batch) et Redpanda (CDC) peuvent livrer deux fois la même ligne.
+      On conserve la version la plus récemment ingérée (_ingested_at desc).
+    gravite: bloquant
+
+  - id: RG_08
+    nom: Normalisation des périodes ouvertes
+    intention: >
+      Un rattachement actif a date_fin = NULL. On expose une colonne
+      normalisée à 9999-12-31 pour fiabiliser les jointures BETWEEN.
+    gravite: obligatoire
+
+  - id: RG_13
+    nom: Non-chevauchement des dossiers
+    intention: >
+      Un individu ne peut pas être rattaché à deux dossiers actifs en même
+      temps — sinon double prise en charge du même bénéficiaire.
+    gravite: bloquant
+    implementation: macro detect_overlapping_periods (règle algorithmique)

@@ -1,0 +1,140 @@
+name: benefits_lakehouse
+version: "3.0.0"
+config-version: 2
+profile: benefits_lakehouse
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+clean-targets: ["target", "dbt_packages"]
+
+# ══════════════════════════════════════════════════════════════════════════
+# CONTRAT DE DONNÉES CENTRALISÉ (partie déclarative des RG)
+# ─────────────────────────────────────────────────────────────────────────
+# Ce bloc YAML est la SOURCE DE VÉRITÉ machine-readable des règles
+# déclaratives : domaines de valeurs (RG_09, RG_10), plafonds (RG_15),
+# seuils (RG_19, RG_20). Les macros et tests dbt le LISENT via var() —
+# aucune valeur métier n'est codée en dur dans le SQL.
+# L'intention métier détaillée (le "pourquoi") vit dans contracts/*.yml.
+# Les règles algorithmiques (RG_13, RG_23…) vivent dans macros/ et tests/.
+# ══════════════════════════════════════════════════════════════════════════
+vars:
+  # 'warn' (défaut atelier : on observe) ou 'error' (fail-fast : make test-strict)
+  rg_severity: warn
+
+  # RG_07 — anonymisation PII selon le rôle de connexion
+  current_role: analyste_bi
+  pii_roles_autorises: ["gestionnaire_dossier", "dpo", "auditeur"]
+
+  # RG_18/RG_21 — bornes temporelles
+  date_debut_activite: "2020-01-01"
+  date_fin_ouverte: "9999-12-31"
+
+  contracts:
+    permis:
+      # RG_09 — référentiel OCPM
+      domaine_permis: ["B", "C", "F", "N", "S", "L"]
+    prestation:
+      # RG_10 — types autorisés par la LASLP
+      domaine_type_prestation:
+        - FORFAIT_ENTRETIEN
+        - FORFAIT_INTEGRATION
+        - LOYER
+        - PRIME_LAMAL
+        - AIDE_URGENCE
+        - AVANCE_RENTE
+        - AIDE_EXCEPTIONNELLE
+        - AIDE_MATERIELLE
+        - FORFAIT_ETSP
+      # RG_15 — barèmes institutionnels (CHF)
+      plafonds:
+        LOYER: 2500
+        FORFAIT_ENTRETIEN: 1800
+        AVANCE_RENTE: 3500
+        AIDE_URGENCE: 100
+      # RG_19 — plafond de cumul mensuel par individu (CHF)
+      plafond_cumul_mensuel_chf: 5000
+      # RG_25 — PRIME_LAMAL réservée aux 18-25 ans
+      prime_lamal_age_min: 18
+      prime_lamal_age_max: 25
+      # RG_27 — types réservés aux migrants : exigent un permis actif
+      types_reserves_migrants: ["FORFAIT_INTEGRATION", "AIDE_URGENCE", "FORFAIT_ETSP"]
+    individu:
+      # RG_20 — âge à partir duquel le FORFAIT_ENTRETIEN est une anomalie
+      age_senior: 65
+      # RG_06 — borne basse plausible d'une date de naissance
+      date_naissance_min: "1900-01-01"
+      # RG_28 — format du numéro AVS suisse (NAVS13)
+      navs_regex: '^756\.\d{4}\.\d{4}\.\d{2}$'
+    bronze:
+      # RG_30 — volumétrie minimale attendue par table à chaque run
+      volume_minimum:
+        individu: 5
+        dossier: 5
+        permis: 3
+        prestation: 10
+    gold:
+      # RG_33 — minimisation : colonnes interdites en zone Gold (LPD/RGPD)
+      colonnes_pii_interdites: ["nom", "prenom", "email", "navs"]
+
+# RG_34 — journalisation des accès PII : chaque run est tracé avec le rôle
+# courant dans audit.pii_access_log (voir macros/dpo_tools.sql)
+on-run-end:
+  - "{{ log_pii_access(results) }}"
+
+models:
+  benefits_lakehouse:
+    # Documentation-as-code : les descriptions des schema.yml sont poussées
+    # comme commentaires SQL dans PostgreSQL (visibles dans pgAdmin/Dremio)
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: silver
+      +tags: ["silver"]
+    marts:
+      +materialized: table
+      +schema: gold
+      +tags: ["gold"]
+  elementary:
+    +schema: elementary
+
+seeds:
+  benefits_lakehouse:
+    +schema: bronze
+    +tags: ["bronze", "seed"]
+    individu:
+      +column_types:
+        date_naissance: date
+        date_deces: date
+        _ingested_at: timestamp
+    dossier:
+      +column_types:
+        date_debut: date
+        date_fin: date
+        _ingested_at: timestamp
+    permis:
+      +column_types:
+        date_debut: date
+        date_fin: date
+        _ingested_at: timestamp
+    prestation:
+      +column_types:
+        montant_prestation: numeric(12,2)
+        date_debut_prestation: date
+        date_fin_prestation: date
+        date_prestation: date
+        _ingested_at: timestamp
+
+snapshots:
+  benefits_lakehouse:
+    +target_schema: snapshots
+
+data_tests:
+  benefits_lakehouse:
+    +store_failures: true

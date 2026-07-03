@@ -1,0 +1,17 @@
+# Environnement local
+.env
+.venv/
+__pycache__/
+
+# Artefacts dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+dbt/edr_target/
+logs/
+
+# Divers
+*.log
+.DS_Store
+cahier_atelier_old.md

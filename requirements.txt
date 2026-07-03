@@ -1,0 +1,6 @@
+dbt-core>=1.7,<1.9
+dbt-postgres>=1.7,<1.9
+elementary-data[postgres]>=0.15,<0.17
+openlineage-dbt>=1.16
+sqlfluff>=3.0,<3.2
+sqlfluff-templater-dbt>=3.0,<3.2

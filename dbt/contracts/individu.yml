@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CONTRAT MÉTIER — INDIVIDU (édité par le Business Analyst, sans SQL)
+# ═══════════════════════════════════════════════════════════════════════════
+# L'individu est le bénéficiaire : les prestations lui sont versées
+# personnellement (sauf le LOYER, versé au foyer/dossier).
+
+metadata:
+  name: individu
+  domain: beneficiaires
+  owner_metier: Direction de l'action sociale
+  owner_technique: Équipe Data
+  criticite: haute
+  donnees_personnelles: oui   # → RG_07 obligatoire
+
+schema:
+  cle_metier: [numero_individu]
+  colonnes_pii: [nom, prenom, email, navs]
+
+regles:
+  - id: RG_05
+    nom: Normalisation du sexe
+    intention: "H/F/X/vide → Homme/Femme/Non binaire/Non spécifié."
+    gravite: informatif
+
+  - id: RG_06
+    nom: Cohérence biographique
+    intention: >
+      date_naissance ≤ aujourd'hui (et ≥ 1900-01-01) ;
+      date_deces ≥ date_naissance. Une incohérence bloque : elle fausse
+      l'âge, donc RG_20 (seniors) et les analyses démographiques.
+    gravite: bloquant
+
+  - id: RG_07
+    nom: Anonymisation PII
+    intention: >
+      nom, prénom, email et NAVS ne sont visibles que des rôles habilités
+      (gestionnaire_dossier, dpo, auditeur). Exigence LPD/RGPD.
+    gravite: bloquant
+
+  - id: RG_20
+    nom: Senior et FORFAIT_ENTRETIEN
+    intention: >
+      Un bénéficiaire de 65 ans et plus relève des prestations
+      complémentaires AVS/AI : un forfait entretien versé à un senior
+      est une anomalie à signaler (non bloquante).
+    gravite: alerte
+
+  - id: RG_28
+    nom: Format du NAVS
+    intention: >
+      Le numéro AVS suisse (NAVS13) suit le format 756.xxxx.xxxx.xx.
+      Un NAVS malformé empêche tout croisement avec les registres fédéraux.
+    gravite: bloquant
+
+  - id: RG_33
+    nom: Minimisation des données (LPD/RGPD)
+    intention: >
+      Aucune colonne nominative (nom, prénom, email, NAVS) ne doit exister
+      en zone Gold : la BI travaille sur des identifiants pseudonymes.
+    gravite: bloquant
+
+  - id: RG_34
+    nom: Journalisation des accès PII
+    intention: >
+      Chaque exécution du pipeline est journalisée avec le rôle courant et
+      le niveau d'exposition des PII (audit.pii_access_log).
+    gravite: obligatoire
+
+  - id: RG_35
+    nom: Droit à l'oubli
+    intention: >
+      Sur demande, un individu est purgé de la zone Bronze
+      (dbt run-operation rgpd_forget) et la purge se propage au build
+      suivant. La demande est journalisée sans PII.
+    gravite: obligatoire

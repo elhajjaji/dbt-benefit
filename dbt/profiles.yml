@@ -1,0 +1,37 @@
+# Profils dbt de l'atelier.
+# En formation, dbt s'exécute contre PostgreSQL (schémas bronze/silver/gold).
+# La cible lakehouse (Dremio/Nessie) est illustrée dans le cahier, séquence WAP.
+benefits_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5433') | int }}"
+      user: "{{ env_var('DBT_USER', 'user') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'password') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'pocs') }}"
+      schema: silver
+      threads: 4
+    ci:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5433') | int }}"
+      user: "{{ env_var('DBT_USER', 'user') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'password') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'pocs') }}"
+      schema: ci_silver
+      threads: 4
+
+# Profil requis par le CLI Elementary (edr report)
+elementary:
+  outputs:
+    default:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5433') | int }}"
+      user: "{{ env_var('DBT_USER', 'user') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'password') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'pocs') }}"
+      schema: elementary
+      threads: 4

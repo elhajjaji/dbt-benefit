@@ -1,0 +1,91 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CONTRAT MÉTIER — PRESTATION (édité par le Business Analyst, sans SQL)
+# ═══════════════════════════════════════════════════════════════════════════
+# RÈGLE FONDAMENTALE : les prestations sont versées à l'INDIVIDU, pas au
+# dossier. Exception : le LOYER est versé au niveau du foyer (dossier),
+# une seule fois par mois (RG_17).
+#
+# Les valeurs machine-readable (domaines, plafonds, seuils) sont portées par
+# le bloc `vars.contracts.prestation` de dbt_project.yml : c'est LA valeur
+# exécutée. Ce fichier documente l'intention, les exceptions et la gouvernance.
+# Toute évolution passe par une Pull Request revue par le métier ET l'équipe data.
+
+metadata:
+  name: prestation
+  domain: versements_aide_sociale
+  owner_metier: Direction de l'action sociale
+  owner_technique: Équipe Data
+  criticite: haute
+
+regles:
+  - id: RG_10
+    nom: Domaine des types de prestation (LASLP)
+    intention: >
+      Seuls les 9 types prévus par la loi (LASLP) peuvent apparaître.
+      Un type inconnu signale une erreur de saisie ou un flux corrompu.
+    gravite: bloquant
+
+  - id: RG_14
+    nom: Montant strictement positif
+    intention: >
+      Un versement négatif ou nul n'a pas de sens comptable (les
+      remboursements suivent un autre circuit). Fail-fast.
+    gravite: bloquant
+
+  - id: RG_15
+    nom: Plausibilité du montant (barème institutionnel)
+    intention: >
+      Un montant au-dessus du barème n'est pas forcément une erreur
+      (dérogations possibles) → alerte non bloquante, revue par le métier.
+    gravite: alerte
+    notes:
+      - "LOYER : 2 500 CHF/mois — AIDE_URGENCE : 100 CHF/jour"
+      - "FORFAIT_ENTRETIEN : 1 800 CHF/mois — AVANCE_RENTE : 3 500 CHF"
+
+  - id: RG_16
+    nom: Unicité du FORFAIT_ENTRETIEN
+    intention: Un seul forfait entretien par individu et par mois.
+    gravite: bloquant
+
+  - id: RG_17
+    nom: Unicité du LOYER par dossier
+    intention: >
+      Le loyer couvre le foyer : un seul versement par DOSSIER et par mois,
+      même si plusieurs membres du foyer le demandent.
+    gravite: bloquant
+
+  - id: RG_18
+    nom: Conformité de couverture
+    intention: >
+      Tout versement doit être adossé à un dossier ou un permis actif à la
+      date du versement. Un versement hors couverture est audité, pas rejeté.
+    gravite: alerte
+
+  - id: RG_19
+    nom: Plafond de cumul mensuel
+    intention: Cumul mensuel par individu > 5 000 CHF → alerte DPO.
+    gravite: alerte
+
+  - id: RG_25
+    nom: Âge PRIME_LAMAL
+    intention: >
+      La prime d'assurance-maladie est réservée aux 18-25 ans. L'âge
+      s'évalue à la DATE DU VERSEMENT, pas à aujourd'hui.
+    gravite: alerte
+
+  - id: RG_26
+    nom: Versement après décès
+    intention: >
+      Aucun versement ne doit intervenir après la date de décès du
+      bénéficiaire — indicateur direct de fraude ou de défaut de clôture.
+    gravite: bloquant
+
+  - id: RG_27
+    nom: Prestation migrant sans permis
+    intention: >
+      FORFAIT_INTEGRATION, AIDE_URGENCE et FORFAIT_ETSP sont réservés aux
+      migrants : ils exigent un permis valide actif à la date du versement.
+    gravite: alerte
+
+exceptions_connues:
+  - "AIDE_URGENCE : plusieurs versements par mois sont LÉGITIMES (forfait quotidien)."

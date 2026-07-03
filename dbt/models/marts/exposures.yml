@@ -1,0 +1,47 @@
+version: 2
+
+# ══════════════════════════════════════════════════════════════════════════
+# EXPOSURES — les consommateurs AVAL déclarés comme du code.
+# Ils apparaissent dans le graphe dbt docs et dans le lignage : on sait qui
+# casse si un modèle change, et `dbt ls --select +exposure:...` liste tout
+# ce dont dépend un dashboard.
+# ══════════════════════════════════════════════════════════════════════════
+
+exposures:
+  - name: dashboard_pilotage_prestations
+    label: Dashboard Metabase — Pilotage des prestations
+    type: dashboard
+    maturity: medium
+    url: http://localhost:3002/dashboard/pilotage-prestations
+    description: >
+      Dashboard principal du métier : KPI mensuels par type de prestation
+      (colonnes pivotées mnt_*), taux de conformité de couverture (RG_18),
+      alertes DPO (RG_15, RG_19, RG_20, RG_25, RG_26, RG_27) et doublons
+      de loyer (RG_17).
+    depends_on:
+      - ref('fct_prestations')
+      - ref('agg_prestations_mensuelles')
+      - ref('agg_loyers_dossier_mensuel')
+      - ref('dim_calendrier')
+    owner:
+      name: Direction de l'action sociale
+      email: pilotage@institution.example
+
+  - name: rapport_audit_dpo
+    label: Rapport d'audit DPO — anomalies par règle de gestion
+    type: analysis
+    maturity: high
+    description: >
+      Comptage des anomalies par RG (analyse audit_tableau_de_bord_rg),
+      exécuté à la demande du DPO ou en run planifié. Complété par le
+      journal des accès PII (audit.pii_access_log, RG_34) et le journal
+      des purges RGPD (audit.rgpd_forget_log, RG_35).
+    depends_on:
+      - ref('fct_prestations')
+      - ref('agg_prestations_mensuelles')
+      - ref('agg_loyers_dossier_mensuel')
+      - ref('stg_individu')
+      - ref('stg_permis')
+    owner:
+      name: Délégué à la protection des données (DPO)
+      email: dpo@institution.example
