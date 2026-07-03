@@ -2,7 +2,8 @@
 # Plateforme Data Lakehouse — Atelier Aide Sociale
 #
 # Profils Docker Compose (démarrage sélectif pour machines modestes) :
-#   (aucun)        → postgres (base source pocs, déjà disponible chez vous : voir .env)
+#   (aucun)        → aucun service — la base source pocs est fournie par le
+#                    repository benefits-dataset (voir README, « Base source »)
 #   lakehouse      → MinIO (S3) + Nessie (catalogue Iceberg versionné)
 #   ingestion      → NiFi (batch) + Redpanda/Debezium (CDC)
 #   orchestration  → Airflow (planification des runs dbt)
@@ -19,25 +20,9 @@ name: benefits-lakehouse
 services:
 
   # ── Base source (schéma src : individu, dossier, permis, prestation) ──────
-  # Si votre PostgreSQL source tourne déjà ailleurs, commentez ce service et
-  # renseignez POSTGRES_HOST dans .env.
-  postgres:
-    image: postgres:15
-    container_name: benefits-postgres
-    command: ["postgres", "-c", "wal_level=logical"]   # requis pour le CDC Debezium
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-pocs}
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-pocs}"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
+  # La base pocs n'est PAS gérée par ce compose : elle est fournie par le
+  # repository benefits-dataset (conteneurs pocs-postgres:5433 et pocs-pgadmin:5050).
+  # Démarche d'installation : README.md, section « Base source (prérequis) ».
 
   # ── Lakehouse : stockage objet + catalogue Iceberg versionné ──────────────
   minio:
@@ -52,7 +37,7 @@ services:
       - "9000:9000"   # API S3
       - "9001:9001"   # Console web
     volumes:
-      - miniodata:/data
+      - ./volumes/minio:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -94,7 +79,7 @@ services:
     ports:
       - "8443:8443"   # https://localhost:8443/nifi
     volumes:
-      - nifidata:/opt/nifi/nifi-current/state
+      - ./volumes/nifi:/opt/nifi/nifi-current/state
 
   # ── Ingestion streaming : Redpanda + Debezium (CDC) ───────────────────────
   redpanda:
@@ -111,7 +96,7 @@ services:
       - "19092:19092"   # Kafka API (depuis l'hôte)
       - "9644:9644"     # Admin API
     volumes:
-      - redpandadata:/var/lib/redpanda/data
+      - ./volumes/redpanda:/var/lib/redpanda/data
 
   redpanda-console:
     image: redpandadata/console:v2.5.2
@@ -147,7 +132,7 @@ services:
       - "31010:31010"  # ODBC/JDBC
       - "32010:32010"  # Arrow Flight
     volumes:
-      - dremiodata:/opt/dremio/data
+      - ./volumes/dremio:/opt/dremio/data
     deploy:
       resources:
         limits:
@@ -162,7 +147,7 @@ services:
     environment:
       MB_DB_FILE: /metabase-data/metabase.db
     volumes:
-      - metabasedata:/metabase-data
+      - ./volumes/metabase:/metabase-data
 
   # ── Orchestration : Apache Airflow ─────────────────────────────────────────
   # Mode standalone (SQLite + LocalExecutor) : suffisant pour l'atelier.
@@ -192,7 +177,7 @@ services:
     volumes:
       - ./orchestration/airflow/dags:/opt/airflow/dags
       - ./dbt:/opt/benefits/dbt
-      - airflowdata:/opt/airflow
+      - ./volumes/airflow:/opt/airflow
 
   # ── Observabilité : lignage OpenLineage ────────────────────────────────────
   marquez-db:
@@ -204,7 +189,7 @@ services:
       POSTGRES_PASSWORD: marquez
       POSTGRES_DB: marquez
     volumes:
-      - marquezdata:/var/lib/postgresql/data
+      - ./volumes/marquez-db:/var/lib/postgresql/data
 
   marquez:
     image: marquezproject/marquez:0.47.0
@@ -232,13 +217,3 @@ services:
       MARQUEZ_PORT: "5000"
     ports:
       - "3000:3000"   # http://localhost:3000
-
-volumes:
-  pgdata:
-  miniodata:
-  nifidata:
-  redpandadata:
-  dremiodata:
-  metabasedata:
-  marquezdata:
-  airflowdata:

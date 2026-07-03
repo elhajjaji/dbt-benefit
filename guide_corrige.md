@@ -5,7 +5,7 @@ _A. EL HAJJAJI_
 Ce guide est le **compagnon d'exécution** du [cahier_atelier.md](cahier_atelier.md) : pour chaque séquence, les commandes exactes à taper, le résultat attendu (vérifié sur cette plateforme), et le corrigé de chaque exercice. À dérouler tel quel pour préparer l'atelier ou pour le rejouer en autonomie.
 
 **Conventions :**
-- Toutes les commandes se lancent depuis la racine du projet (`/di/dev/data/dbt_benefit`), sauf mention contraire.
+- Toutes les commandes se lancent depuis la racine du projet (le dossier où vous avez cloné ce repository), sauf mention contraire.
 - `✅ Attendu :` décrit ce que vous devez observer. Si vous observez autre chose → annexe B du cahier (dépannage).
 - 🔄 **Reset** : après chaque démo destructive, `make seed && make build` remet la plateforme dans l'état nominal.
 
@@ -14,7 +14,7 @@ Ce guide est le **compagnon d'exécution** du [cahier_atelier.md](cahier_atelier
 ## 0. Préparation (à faire AVANT le jour 1)
 
 ```bash
-cd /di/dev/data/dbt_benefit
+cd <racine-du-projet>   # le dossier où vous avez cloné ce repository
 
 # 0.1 — Vérifier que la base source tourne (elle est fournie par benefits-dataset)
 docker ps | grep pocs
@@ -26,7 +26,7 @@ docker ps | grep pocs
 cp .env.example .env          # les valeurs par défaut pointent déjà sur pocs-postgres:5433
 
 # 0.3 — Plateforme complète (≈ 2-3 min ; Airflow peut attendre le jour 3)
-docker compose --profile "*" up -d
+make up                        # crée les volumes locaux ./volumes/* puis démarre tous les profils
 docker compose --profile "*" ps
 ```
 > ✅ Attendu : tous les services `Up` ; `benefits-airflow` peut mettre 2-3 min de plus (il installe dbt au premier boot).
@@ -136,7 +136,9 @@ docker exec -it pocs-postgres psql -U user -d pocs -c "show wal_level;"
 curl -X POST http://localhost:8083/connectors -H "Content-Type: application/json" \
   -d @ingestion/debezium/connector-postgres-benefits.json
 # puis provoquer un UPDATE (cahier §4.4) et observer http://localhost:8086
-# si 'replica' : faire la démo sur le service postgres du compose (déjà configuré wal_level=logical)
+# si 'replica' : activer le WAL logique puis redémarrer la source :
+docker exec pocs-postgres psql -U user -d pocs -c "alter system set wal_level = logical;"
+docker restart pocs-postgres
 ```
 
 ---
@@ -446,4 +448,4 @@ from {{ ref('fct_prestations') }} where is_hors_retention
 | Snapshots pollués par les démos | `docker exec -it pocs-postgres psql -U user -d pocs -c "drop schema snapshots cascade;" && make snapshot` |
 | Journaux d'audit à vider (nouveau groupe) | `docker exec -it pocs-postgres psql -U user -d pocs -c "drop schema audit cascade;"` (recréé au prochain run) |
 | Fraîcheur en erreur | `make freshen` |
-| Tout recommencer | `docker compose --profile "*" down -v && docker compose --profile "*" up -d` puis §0 |
+| Tout recommencer | `docker compose --profile "*" down && rm -rf volumes/* && make up` puis §0 |

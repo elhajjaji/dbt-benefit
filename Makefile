@@ -5,7 +5,11 @@
 DBT = cd dbt && dbt
 PSQL = docker exec -i $${SOURCE_CONTAINER:-pocs-postgres} psql -U $${POSTGRES_USER:-user} -d $${POSTGRES_DB:-pocs}
 
-up:            ## Démarre toute la plateforme
+prep:          ## Crée les volumes locaux ./volumes/* (requis avant tout docker compose up)
+	mkdir -p volumes/minio volumes/nifi volumes/redpanda volumes/dremio volumes/metabase volumes/airflow volumes/marquez-db
+	chmod 777 volumes/*
+
+up: prep       ## Démarre toute la plateforme
 	docker compose --profile "*" up -d
 
 down:          ## Arrête la plateforme (conserve les volumes)
@@ -55,15 +59,27 @@ forget:        ## RG_35 — droit à l'oubli : make forget IND=IND-011
 	$(DBT) run-operation rgpd_forget --args '{numero_individu: $(IND)}'
 	$(DBT) build
 
-pdf:           ## Régénère cahier_atelier.pdf depuis le markdown
-	mkdir -p $$HOME/tmp_pdf
+# Build sous $HOME (chromium snap n'accède pas à /tmp) ; les liens relatifs
+# sont réécrits vers GitHub (docs/pdf-links.lua) : aucun chemin local dans les PDF.
+PDF_BUILD = $${HOME}/tmp_pdf
+
+pdf:           ## Régénère cahier_atelier.pdf et guide_corrige.pdf depuis les markdown
+	mkdir -p $(PDF_BUILD)
 	pandoc cahier_atelier.md -f gfm -t html5 --standalone --embed-resources \
+	  --lua-filter docs/pdf-links.lua \
 	  --css docs/pdf.css --metadata pagetitle="Cahier d'Atelier — Benefits Lakehouse" \
-	  -o $$HOME/tmp_pdf/cahier_atelier.html
-	cd $$HOME/tmp_pdf && chromium --headless=new --disable-gpu \
+	  -o $(PDF_BUILD)/cahier_atelier.html
+	pandoc guide_corrige.md -f gfm -t html5 --standalone --embed-resources \
+	  --lua-filter docs/pdf-links.lua \
+	  --css docs/pdf.css --metadata pagetitle="Guide pratique — corrigé exécutable de l'atelier" \
+	  -o $(PDF_BUILD)/guide_corrige.html
+	cd $(PDF_BUILD) && chromium --headless=new --disable-gpu \
 	  --no-pdf-header-footer --print-to-pdf=cahier_atelier.pdf \
-	  "file://$$HOME/tmp_pdf/cahier_atelier.html"
-	cp $$HOME/tmp_pdf/cahier_atelier.pdf . && rm -rf $$HOME/tmp_pdf
+	  "file://$(PDF_BUILD)/cahier_atelier.html"
+	cd $(PDF_BUILD) && chromium --headless=new --disable-gpu \
+	  --no-pdf-header-footer --print-to-pdf=guide_corrige.pdf \
+	  "file://$(PDF_BUILD)/guide_corrige.html"
+	cp $(PDF_BUILD)/cahier_atelier.pdf $(PDF_BUILD)/guide_corrige.pdf . && rm -rf $(PDF_BUILD)
 
 clean:
 	$(DBT) clean

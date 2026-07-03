@@ -1,6 +1,7 @@
 # Environnement local
 .env
 .venv/
+volumes/
 __pycache__/
 
 # Artefacts dbt

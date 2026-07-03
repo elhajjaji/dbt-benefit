@@ -9,12 +9,30 @@ par Elementary et Marquez.
 📖 **Le cahier d'atelier complet (3 journées) est dans [cahier_atelier.md](cahier_atelier.md)** (PDF : `make pdf`).
 🧭 **Le pas-à-pas animateur avec toutes les commandes et corrigés : [guide_corrige.md](guide_corrige.md).**
 
+## Base source (prérequis)
+
+La base PostgreSQL `pocs` (schéma `src` : `individu`, `dossier`, `permis`, `prestation`) n'est **pas** gérée par ce projet : elle est fournie par le repository [benefits-dataset](https://github.com/elhajjaji/benefits-dataset).
+
+```bash
+# 1. Récupérer et démarrer la base source
+git clone https://github.com/elhajjaji/benefits-dataset.git
+cd benefits-dataset
+docker compose up -d --build
+# → pocs-postgres (localhost:5433, user/password, base pocs)
+# → pocs-pgadmin  (http://localhost:5050)
+
+# 2. Activer le WAL logique (requis une seule fois, pour le CDC Debezium — séquence S4)
+docker exec pocs-postgres psql -U user -d pocs -c "alter system set wal_level = logical;"
+docker restart pocs-postgres
+docker exec pocs-postgres psql -U user -d pocs -c "show wal_level;"   # → logical
+```
+
 ## Démarrage rapide
 
 ```bash
-# 1. Plateforme (Docker ≥ 24, ~13 conteneurs, 16 Go RAM recommandés)
+# 1. Plateforme (Docker ≥ 24, ~12 conteneurs, 16 Go RAM recommandés)
 cp .env.example .env
-docker compose --profile "*" up -d          # ou : make up
+make up          # crée les volumes locaux ./volumes/* puis docker compose --profile "*" up -d
 
 # 2. Outillage Python
 python -m venv .venv && source .venv/bin/activate
@@ -72,6 +90,7 @@ Identifiants : voir `.env.example`.
 │   ├── tests/                 # tests singuliers (RG_13,16,23,24,29,33)
 │   └── analyses/              # tableau de bord d'audit DPO
 ├── docs/pdf.css               # feuille de style du PDF
+├── volumes/                   # données locales des conteneurs (non versionné)
 └── .github/workflows/
     ├── ci.yml                 # PR : lint → unit → build → test des tests → Pages
     └── nightly.yml            # nuit : fraîcheur, volumes, rapport Elementary

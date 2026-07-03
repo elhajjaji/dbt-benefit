@@ -8,7 +8,7 @@ _A. EL HAJJAJI_
 
 **Cas d'usage :** ce cas d'usage cible l'analyse des données sociales — versements d'aide sociale et d'aide aux migrants — pour permettre à l'institution qui les détient d'en assurer le pilotage, la conformité et l'audit financier.
 
-**Dataset source :** PostgreSQL `pocs` — schéma `src` — 4 tables : `individu`, `dossier`, `permis`, `prestation` (repository `elhajjaji/benefits-dataset`). **La base source est déjà disponible** (conteneurs `pocs-postgres` et `pocs-pgadmin`) : l'atelier ne la construit pas, il la consomme.
+**Dataset source :** PostgreSQL `pocs` — schéma `src` — 4 tables : `individu`, `dossier`, `permis`, `prestation` (repository `elhajjaji/benefits-dataset`). **La base source n'est pas gérée par ce projet** : l'atelier ne la construit pas, il la consomme. Elle se démarre depuis le repository `benefits-dataset` (conteneurs `pocs-postgres` et `pocs-pgadmin`) — démarche d'installation dans le README, section « Base source (prérequis) ».
 
 **Stack technique :** PostgreSQL 15+, Apache NiFi, Redpanda + Debezium (CDC), MinIO (S3), Apache Iceberg, Project Nessie, **Apache Airflow**, dbt Core 1.8+ (dbt-utils, dbt-expectations, unit tests, Elementary), OpenLineage/Marquez, Dremio, Metabase, GitHub Actions, SQLFluff, pre-commit.
 
@@ -284,17 +284,18 @@ Pourquoi trois zones ? **Bronze** garde la vérité brute (rejouable, auditable)
 
 ### 3.2. Démarrage
 
-> ℹ️ **La base source tourne déjà** (`pocs-postgres` / `pocs-pgadmin`). Le `.env.example` pointe dessus par défaut ; le service `postgres` du compose n'est qu'un secours.
+> ℹ️ **La base source tourne déjà** (`pocs-postgres` / `pocs-pgadmin`, démarrés depuis le repository `benefits-dataset` — voir README, « Base source »). Le `.env.example` pointe dessus par défaut.
 
 ```bash
 cp .env.example .env
-docker compose --profile "*" up -d       # tout démarrer (≈ 2-3 min, hors Airflow)
+make up                                  # crée ./volumes/* puis démarre tout (≈ 2-3 min, hors Airflow)
 docker compose --profile "*" ps          # tout doit être Up / healthy
 ```
 
 Sur une machine à moins de 16 Go de RAM, démarrer par étage au fil des jours :
 
 ```bash
+make prep                                                         # volumes locaux ./volumes/*
 docker compose --profile lakehouse --profile ingestion up -d      # Jour 1
 docker compose --profile orchestration up -d                      # Jour 3 matin
 docker compose --profile bi --profile lineage up -d               # Jour 3
@@ -387,7 +388,8 @@ curl -X POST http://localhost:8083/connectors \
 docker exec -it pocs-postgres psql -U user -d pocs \
   -c "update src.individu set email = 'nouveau@example.ch' where id = 1;"
 #    (prérequis CDC : wal_level=logical sur la base source — vérifier avec
-#     SHOW wal_level; sinon utiliser le service postgres du compose)
+#     SHOW wal_level; sinon : ALTER SYSTEM SET wal_level = logical;
+#     puis docker restart pocs-postgres — voir README, « Base source »)
 
 # 4. Le consommateur écrit dans Iceberg en ajoutant les colonnes RG_01 :
 python ingestion/redpanda/consumer_bronze.py individu
@@ -1066,8 +1068,10 @@ Remarque de gouvernance : ce dashboard est **déclaré** dans `exposures.yml` (S
 ### A. Démarrage rapide (rappel)
 
 ```bash
+# Prérequis : base source pocs démarrée depuis le repository benefits-dataset
+# (docker compose up -d --build, puis wal_level=logical — voir README)
 cp .env.example .env
-docker compose --profile "*" up -d
+make up
 python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 pre-commit install
 make seed && make unit && make build && make audit
@@ -1085,7 +1089,7 @@ make seed && make unit && make build && make audit
 | Marquez UI vide | `OPENLINEAGE_URL` non exporté | exporter puis relancer `make lineage` |
 | `dbt source freshness` en erreur | seeds anciens | `make freshen` |
 | RG_31 (Elementary) alerte bizarrement | pas assez d'historique de runs | normal les premiers jours — en discuter, c'est le concept |
-| Port 3000/5432 occupé | service local existant | adapter les ports côté hôte dans docker-compose.yml |
+| Port 3000/8083 occupé | service local existant | adapter les ports côté hôte dans docker-compose.yml |
 | Unit test échoue sur la précision numérique | comparaison exacte | caster/arrondir dans le modèle, attendu en chaîne (`"100.00"`) |
 | La CI échoue sur « fail-fast » en étant verte localement | une RG bloquante a été neutralisée | comparer contrat et tests avec `git diff main` |
 
